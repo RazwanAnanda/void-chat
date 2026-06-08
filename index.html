@@ -1,0 +1,741 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>THE VOID — anonymous chat</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=Syne:wght@400;700;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:        #050508;
+    --surface:   #0d0d14;
+    --border:    #1a1a2e;
+    --accent:    #7c3aed;
+    --accent2:   #06b6d4;
+    --accent3:   #f472b6;
+    --text:      #e2e8f0;
+    --muted:     #475569;
+    --sys:       #334155;
+    --glow:      rgba(124,58,237,0.4);
+    --glow2:     rgba(6,182,212,0.3);
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Space Mono', monospace;
+    overflow: hidden;
+  }
+
+  /* Animated background */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background:
+      radial-gradient(ellipse 80% 50% at 20% 10%, rgba(124,58,237,0.08) 0%, transparent 60%),
+      radial-gradient(ellipse 60% 40% at 80% 90%, rgba(6,182,212,0.06) 0%, transparent 60%),
+      radial-gradient(ellipse 40% 60% at 50% 50%, rgba(244,114,182,0.03) 0%, transparent 70%);
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* Scanline overlay */
+  body::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0,0,0,0.03) 2px,
+      rgba(0,0,0,0.03) 4px
+    );
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  #app {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    max-width: 860px;
+    margin: 0 auto;
+  }
+
+  /* ── Header ── */
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--border);
+    background: rgba(5,5,8,0.8);
+    backdrop-filter: blur(12px);
+    flex-shrink: 0;
+  }
+
+  .logo {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .logo-mark {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: conic-gradient(from 180deg, var(--accent), var(--accent2), var(--accent3), var(--accent));
+    animation: spin 8s linear infinite;
+    filter: blur(0.5px);
+    flex-shrink: 0;
+  }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .logo-text {
+    font-family: 'Syne', sans-serif;
+    font-weight: 800;
+    font-size: 18px;
+    letter-spacing: 0.15em;
+    background: linear-gradient(90deg, var(--accent2), var(--accent3));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .logo-sub {
+    font-size: 9px;
+    letter-spacing: 0.3em;
+    color: var(--muted);
+    text-transform: uppercase;
+    margin-top: 1px;
+  }
+
+  .header-right {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .online-badge {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    color: var(--muted);
+    letter-spacing: 0.05em;
+  }
+
+  .online-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--accent2);
+    box-shadow: 0 0 6px var(--accent2);
+    animation: pulse-dot 2s ease-in-out infinite;
+  }
+
+  @keyframes pulse-dot {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.6; transform: scale(0.85); }
+  }
+
+  .share-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 14px;
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--muted);
+    font-family: 'Space Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-transform: uppercase;
+  }
+
+  .share-btn:hover {
+    border-color: var(--accent2);
+    color: var(--accent2);
+    box-shadow: 0 0 12px rgba(6,182,212,0.15);
+  }
+
+  .share-btn.copied {
+    border-color: var(--accent3);
+    color: var(--accent3);
+  }
+
+  /* ── Identity bar ── */
+  #identity-bar {
+    padding: 10px 20px;
+    background: rgba(13,13,20,0.6);
+    border-bottom: 1px solid var(--border);
+    font-size: 11px;
+    color: var(--muted);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+
+  #identity-bar span.you-name {
+    color: var(--accent2);
+    font-weight: 700;
+  }
+
+  /* ── Messages ── */
+  #messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    scroll-behavior: smooth;
+  }
+
+  #messages::-webkit-scrollbar { width: 4px; }
+  #messages::-webkit-scrollbar-track { background: transparent; }
+  #messages::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  .msg-wrap {
+    display: flex;
+    flex-direction: column;
+    animation: fadeUp 0.25s ease;
+  }
+
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(6px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  .msg-wrap.own {
+    align-items: flex-end;
+  }
+
+  .msg-bubble {
+    max-width: 72%;
+    padding: 9px 14px;
+    border-radius: 2px 12px 12px 12px;
+    font-size: 13px;
+    line-height: 1.6;
+    word-break: break-word;
+    position: relative;
+  }
+
+  .msg-wrap.own .msg-bubble {
+    border-radius: 12px 2px 12px 12px;
+    background: linear-gradient(135deg, rgba(124,58,237,0.35), rgba(124,58,237,0.2));
+    border: 1px solid rgba(124,58,237,0.4);
+    color: #e2d9f3;
+  }
+
+  .msg-wrap:not(.own) .msg-bubble {
+    background: rgba(13,13,20,0.9);
+    border: 1px solid var(--border);
+    color: var(--text);
+  }
+
+  .msg-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 4px;
+    font-size: 10px;
+  }
+
+  .msg-wrap.own .msg-meta {
+    flex-direction: row-reverse;
+  }
+
+  .msg-name {
+    color: var(--accent2);
+    font-weight: 700;
+    letter-spacing: 0.03em;
+  }
+
+  .msg-wrap.own .msg-name {
+    color: var(--accent3);
+  }
+
+  .msg-time {
+    color: var(--muted);
+    font-size: 9px;
+  }
+
+  /* System messages */
+  .msg-system {
+    text-align: center;
+    font-size: 10px;
+    color: var(--sys);
+    letter-spacing: 0.08em;
+    padding: 6px 0;
+    font-style: italic;
+  }
+
+  .msg-system::before,
+  .msg-system::after {
+    content: ' ─── ';
+    color: var(--border);
+  }
+
+  /* ── Connecting overlay ── */
+  #connecting {
+    position: fixed;
+    inset: 0;
+    background: var(--bg);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 20px;
+    z-index: 100;
+    transition: opacity 0.4s;
+  }
+
+  #connecting.hidden {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .conn-logo {
+    font-family: 'Syne', sans-serif;
+    font-weight: 800;
+    font-size: 36px;
+    letter-spacing: 0.2em;
+    background: linear-gradient(90deg, var(--accent), var(--accent2), var(--accent3));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .conn-dots {
+    display: flex;
+    gap: 8px;
+  }
+
+  .conn-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--accent);
+    animation: conn-pulse 1.2s ease-in-out infinite;
+  }
+
+  .conn-dot:nth-child(2) { animation-delay: 0.2s; background: var(--accent2); }
+  .conn-dot:nth-child(3) { animation-delay: 0.4s; background: var(--accent3); }
+
+  @keyframes conn-pulse {
+    0%, 100% { transform: scale(0.6); opacity: 0.4; }
+    50% { transform: scale(1); opacity: 1; }
+  }
+
+  .conn-status {
+    font-size: 11px;
+    color: var(--muted);
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+  }
+
+  /* ── Reconnect banner ── */
+  #reconnect-banner {
+    display: none;
+    text-align: center;
+    padding: 8px;
+    background: rgba(244,114,182,0.1);
+    border-bottom: 1px solid rgba(244,114,182,0.3);
+    font-size: 11px;
+    color: var(--accent3);
+    letter-spacing: 0.1em;
+  }
+
+  /* ── Input ── */
+  #input-area {
+    padding: 16px 20px;
+    border-top: 1px solid var(--border);
+    background: rgba(5,5,8,0.9);
+    backdrop-filter: blur(12px);
+    flex-shrink: 0;
+  }
+
+  .input-row {
+    display: flex;
+    gap: 10px;
+    align-items: flex-end;
+  }
+
+  #msg-input {
+    flex: 1;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 11px 14px;
+    color: var(--text);
+    font-family: 'Space Mono', monospace;
+    font-size: 13px;
+    resize: none;
+    min-height: 44px;
+    max-height: 120px;
+    line-height: 1.5;
+    transition: border-color 0.2s, box-shadow 0.2s;
+    outline: none;
+  }
+
+  #msg-input::placeholder {
+    color: var(--muted);
+    font-style: italic;
+  }
+
+  #msg-input:focus {
+    border-color: rgba(124,58,237,0.6);
+    box-shadow: 0 0 0 2px rgba(124,58,237,0.1), 0 0 16px rgba(124,58,237,0.1);
+  }
+
+  #send-btn {
+    width: 44px;
+    height: 44px;
+    background: linear-gradient(135deg, var(--accent), #6d28d9);
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+    flex-shrink: 0;
+  }
+
+  #send-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 20px var(--glow);
+  }
+
+  #send-btn:active {
+    transform: translateY(0);
+  }
+
+  #send-btn svg {
+    width: 18px;
+    height: 18px;
+    fill: white;
+  }
+
+  .input-hint {
+    margin-top: 7px;
+    font-size: 9px;
+    color: var(--sys);
+    letter-spacing: 0.1em;
+  }
+
+  /* Typing indicator */
+  #typing-area {
+    height: 16px;
+    font-size: 10px;
+    color: var(--muted);
+    font-style: italic;
+    padding: 0 20px;
+    letter-spacing: 0.05em;
+    flex-shrink: 0;
+  }
+
+  /* ── Empty state ── */
+  .empty-void {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    opacity: 0.3;
+    padding-bottom: 60px;
+  }
+
+  .void-glyph {
+    font-size: 48px;
+    animation: float 4s ease-in-out infinite;
+  }
+
+  @keyframes float {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-8px); }
+  }
+
+  .void-label {
+    font-size: 11px;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  /* Responsive */
+  @media (max-width: 600px) {
+    header { padding: 10px 14px; }
+    #messages { padding: 12px 14px; }
+    #input-area { padding: 12px 14px; }
+    .logo-text { font-size: 15px; }
+    .msg-bubble { max-width: 85%; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Connecting overlay -->
+<div id="connecting">
+  <div class="conn-logo">THE VOID</div>
+  <div class="conn-dots">
+    <div class="conn-dot"></div>
+    <div class="conn-dot"></div>
+    <div class="conn-dot"></div>
+  </div>
+  <div class="conn-status" id="conn-status">entering the void...</div>
+</div>
+
+<div id="app">
+  <header>
+    <div class="logo">
+      <div class="logo-mark"></div>
+      <div>
+        <div class="logo-text">THE VOID</div>
+        <div class="logo-sub">anonymous · ephemeral · real</div>
+      </div>
+    </div>
+    <div class="header-right">
+      <div class="online-badge">
+        <div class="online-dot"></div>
+        <span id="online-count">1</span> online
+      </div>
+      <button class="share-btn" id="share-btn">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+        Share Link
+      </button>
+    </div>
+  </header>
+
+  <div id="identity-bar">
+    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+    You are: <span class="you-name" id="your-name">...</span>
+    <span style="color:var(--border)">·</span>
+    <span style="font-size:9px; color:var(--muted)">No one knows who you are. Not even us.</span>
+  </div>
+
+  <div id="reconnect-banner">⚠ connection lost — attempting to reconnect...</div>
+
+  <div id="messages">
+    <div class="empty-void" id="empty-state">
+      <div class="void-glyph">◎</div>
+      <div class="void-label">the void awaits</div>
+    </div>
+  </div>
+
+  <div id="typing-area"></div>
+
+  <div id="input-area">
+    <div class="input-row">
+      <textarea id="msg-input" placeholder="whisper into the void..." rows="1" maxlength="500"></textarea>
+      <button id="send-btn" title="Send">
+        <svg viewBox="0 0 24 24"><path d="M22 2L11 13M22 2L15 22l-4-9-9-4 20-7z"/></svg>
+      </button>
+    </div>
+    <div class="input-hint">ENTER to send &nbsp;·&nbsp; SHIFT+ENTER for new line &nbsp;·&nbsp; 500 chars max</div>
+  </div>
+</div>
+
+<script>
+(function() {
+  let ws = null;
+  let myName = null;
+  let reconnectTimer = null;
+  let reconnectDelay = 1000;
+  let typingTimer = null;
+  let isConnected = false;
+
+  const $ = id => document.getElementById(id);
+  const messagesEl = $('messages');
+  const inputEl = $('msg-input');
+  const sendBtn = $('send-btn');
+  const onlineEl = $('online-count');
+  const yourNameEl = $('your-name');
+  const connectingEl = $('connecting');
+  const connStatusEl = $('conn-status');
+  const reconnBanner = $('reconnect-banner');
+  const emptyState = $('empty-state');
+  const shareBtn = $('share-btn');
+  const typingArea = $('typing-area');
+
+  function formatTime(ts) {
+    return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
+
+  function removeEmpty() {
+    if (emptyState && emptyState.parentNode) emptyState.remove();
+  }
+
+  function scrollBottom() {
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  }
+
+  function addSystemMsg(text) {
+    removeEmpty();
+    const div = document.createElement('div');
+    div.className = 'msg-system';
+    div.textContent = text;
+    messagesEl.appendChild(div);
+    scrollBottom();
+  }
+
+  function addMessage(data) {
+    removeEmpty();
+    const isOwn = data.name === myName;
+    const wrap = document.createElement('div');
+    wrap.className = 'msg-wrap' + (isOwn ? ' own' : '');
+
+    const meta = document.createElement('div');
+    meta.className = 'msg-meta';
+
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'msg-name';
+    nameSpan.textContent = isOwn ? 'you' : data.name;
+
+    const timeSpan = document.createElement('span');
+    timeSpan.className = 'msg-time';
+    timeSpan.textContent = formatTime(data.ts);
+
+    meta.appendChild(nameSpan);
+    meta.appendChild(timeSpan);
+
+    const bubble = document.createElement('div');
+    bubble.className = 'msg-bubble';
+    bubble.textContent = data.text;
+
+    wrap.appendChild(meta);
+    wrap.appendChild(bubble);
+    messagesEl.appendChild(wrap);
+    scrollBottom();
+  }
+
+  function renderHistory(history) {
+    history.forEach(msg => {
+      if (msg.type === 'system') addSystemMsg(msg.text);
+      else if (msg.type === 'message') addMessage(msg);
+    });
+  }
+
+  function connect() {
+    const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${location.host}`;
+    connStatusEl.textContent = 'entering the void...';
+
+    try {
+      ws = new WebSocket(wsUrl);
+    } catch (e) {
+      scheduleReconnect();
+      return;
+    }
+
+    ws.onopen = () => {
+      isConnected = true;
+      reconnectDelay = 1000;
+      reconnBanner.style.display = 'none';
+    };
+
+    ws.onmessage = (e) => {
+      let data;
+      try { data = JSON.parse(e.data); } catch { return; }
+
+      if (data.type === 'init') {
+        myName = data.name;
+        yourNameEl.textContent = myName;
+        onlineEl.textContent = data.online;
+        connectingEl.classList.add('hidden');
+        renderHistory(data.history);
+        return;
+      }
+
+      if (data.type === 'online') {
+        onlineEl.textContent = data.count;
+        return;
+      }
+
+      if (data.type === 'system') {
+        addSystemMsg(data.text);
+        return;
+      }
+
+      if (data.type === 'message') {
+        addMessage(data);
+        return;
+      }
+    };
+
+    ws.onclose = () => {
+      isConnected = false;
+      if (myName) {
+        reconnBanner.style.display = 'block';
+      }
+      scheduleReconnect();
+    };
+
+    ws.onerror = () => {
+      ws.close();
+    };
+  }
+
+  function scheduleReconnect() {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = setTimeout(() => {
+      connStatusEl.textContent = 'reconnecting...';
+      connect();
+    }, reconnectDelay);
+    reconnectDelay = Math.min(reconnectDelay * 1.5, 10000);
+  }
+
+  function sendMessage() {
+    const text = inputEl.value.trim();
+    if (!text || !ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({ type: 'message', text }));
+    inputEl.value = '';
+    inputEl.style.height = 'auto';
+  }
+
+  // Auto-resize textarea
+  inputEl.addEventListener('input', () => {
+    inputEl.style.height = 'auto';
+    inputEl.style.height = Math.min(inputEl.scrollHeight, 120) + 'px';
+  });
+
+  inputEl.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
+  });
+
+  sendBtn.addEventListener('click', sendMessage);
+
+  shareBtn.addEventListener('click', () => {
+    navigator.clipboard.writeText(location.href).then(() => {
+      shareBtn.textContent = '✓ Copied!';
+      shareBtn.classList.add('copied');
+      setTimeout(() => {
+        shareBtn.innerHTML = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg> Share Link`;
+        shareBtn.classList.remove('copied');
+      }, 2000);
+    });
+  });
+
+  connect();
+})();
+</script>
+</body>
+</html>
