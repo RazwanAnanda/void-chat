@@ -9,7 +9,9 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 
+// Railway injects PORT automatically — always use it
 const PORT = process.env.PORT || 3000;
+
 const MAX_HISTORY = 200;
 
 // ── Name generation ──────────────────────────────────────────
@@ -34,7 +36,7 @@ function generateName() {
 }
 
 // ── State ────────────────────────────────────────────────────
-const clients = new Map(); // ws -> { name, id }
+const clients = new Map(); // socket -> { name, id }
 const messageHistory = [];
 
 function addToHistory(msg) {
@@ -42,11 +44,11 @@ function addToHistory(msg) {
   if (messageHistory.length > MAX_HISTORY) messageHistory.shift();
 }
 
-function broadcast(data, excludeWs = null) {
+function broadcast(data, excludeSocket = null) {
   const str = JSON.stringify(data);
-  for (const [ws] of clients) {
-    if (ws !== excludeWs && ws.readyState === 1) {
-      ws.send(str);
+  for (const [sock] of clients) {
+    if (sock !== excludeSocket && sock._wsReady) {
+      try { sock.write(buildFrame(str)); } catch (e) {}
     }
   }
 }
@@ -58,7 +60,7 @@ function broadcastAll(data) {
 // ── WebSocket handshake (RFC 6455) ────────────────────────────
 function wsHandshake(req, socket) {
   const key = req.headers['sec-websocket-key'];
-  if (!key) { socket.destroy(); return; }
+  if (!key) { socket.destroy(); return false; }
 
   const accept = crypto
     .createHash('sha1')
@@ -72,12 +74,12 @@ function wsHandshake(req, socket) {
     `Sec-WebSocket-Accept: ${accept}\r\n` +
     '\r\n'
   );
+  return true;
 }
 
 // ── WebSocket frame parser ────────────────────────────────────
 function parseFrame(buf) {
   if (buf.length < 2) return null;
-  const fin = (buf[0] & 0x80) !== 0;
   const opcode = buf[0] & 0x0f;
   const masked = (buf[1] & 0x80) !== 0;
   let payloadLen = buf[1] & 0x7f;
@@ -95,16 +97,13 @@ function parseFrame(buf) {
 
   const maskOffset = offset;
   if (masked) offset += 4;
-
   if (buf.length < offset + payloadLen) return null;
 
   let payload = buf.slice(offset, offset + payloadLen);
   if (masked) {
     const mask = buf.slice(maskOffset, maskOffset + 4);
     payload = Buffer.from(payload);
-    for (let i = 0; i < payload.length; i++) {
-      payload[i] ^= mask[i % 4];
-    }
+    for (let i = 0; i < payload.length; i++) payload[i] ^= mask[i % 4];
   }
 
   return { opcode, payload, totalLength: offset + payloadLen };
@@ -135,16 +134,6 @@ function buildFrame(data, opcode = 0x01) {
   return Buffer.concat([header, payload]);
 }
 
-// Attach send helper to raw socket
-function attachWsSend(socket) {
-  socket.send = function(data) {
-    try {
-      socket.write(buildFrame(data));
-    } catch (e) {}
-  };
-  socket.readyState = 1;
-}
-
 // ── HTTP static file server ───────────────────────────────────
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -167,6 +156,11 @@ function serveFile(res, filePath) {
 
 // ── HTTP server ───────────────────────────────────────────────
 const server = http.createServer((req, res) => {
+  // Health check for Railway
+  if (req.url === '/health') {
+    res.writeHead(200); res.end('ok');
+    return;
+  }
   if (req.url === '/' || req.url === '/index.html') {
     serveFile(res, path.join(__dirname, 'index.html'));
   } else {
@@ -175,14 +169,20 @@ const server = http.createServer((req, res) => {
 });
 
 // ── WebSocket upgrade ─────────────────────────────────────────
-server.on('upgrade', (req, socket) => {
-  if (req.headers['upgrade']?.toLowerCase() !== 'websocket') {
+server.on('upgrade', (req, socket, head) => {
+  const upgradeHeader = (req.headers['upgrade'] || '').toLowerCase();
+  if (upgradeHeader !== 'websocket') {
     socket.destroy();
     return;
   }
 
-  wsHandshake(req, socket);
-  attachWsSend(socket);
+  const ok = wsHandshake(req, socket);
+  if (!ok) return;
+
+  socket._wsReady = true;
+  socket.setTimeout(0);
+  socket.setNoDelay(true);
+  socket.setKeepAlive(true, 30000);
 
   const name = generateName();
   const id = crypto.randomUUID();
@@ -190,25 +190,27 @@ server.on('upgrade', (req, socket) => {
 
   console.log(`[+] ${name} connected (${clients.size} online)`);
 
-  // Send init packet: name + history + online count
-  socket.send(JSON.stringify({
-    type: 'init',
-    name,
-    history: messageHistory,
-    online: clients.size
-  }));
+  // Send init: their name + full history + online count
+  try {
+    socket.write(buildFrame(JSON.stringify({
+      type: 'init',
+      name,
+      history: messageHistory,
+      online: clients.size
+    })));
+  } catch(e) {}
 
-  // Broadcast join notification
+  // Announce join to everyone else
   const joinMsg = {
     type: 'system',
     text: `${name} entered the void`,
     ts: Date.now()
   };
   addToHistory(joinMsg);
-  broadcast(joinMsg, socket);
+  broadcast(joinMsg, socket); // exclude self — they get it via history on reconnect
   broadcastOnlineCount();
 
-  // Frame buffer for partial frames
+  // Frame buffer
   let buffer = Buffer.alloc(0);
 
   socket.on('data', (chunk) => {
@@ -221,20 +223,17 @@ server.on('upgrade', (req, socket) => {
 
       const { opcode, payload } = frame;
 
-      // Ping → Pong
-      if (opcode === 0x09) {
-        socket.write(buildFrame(payload, 0x0a));
+      if (opcode === 0x09) { // Ping → Pong
+        try { socket.write(buildFrame(payload, 0x0a)); } catch(e) {}
         continue;
       }
 
-      // Close
-      if (opcode === 0x08) {
+      if (opcode === 0x08) { // Close
         socket.destroy();
         break;
       }
 
-      // Text
-      if (opcode === 0x01) {
+      if (opcode === 0x01) { // Text
         let parsed;
         try { parsed = JSON.parse(payload.toString('utf8')); } catch { continue; }
 
@@ -250,6 +249,7 @@ server.on('upgrade', (req, socket) => {
             id: crypto.randomUUID()
           };
           addToHistory(msg);
+          // Send to ALL including sender so they see their own message
           broadcastAll(msg);
           console.log(`[msg] ${name}: ${text.slice(0, 60)}`);
         }
@@ -264,7 +264,7 @@ server.on('upgrade', (req, socket) => {
 function handleDisconnect(socket, name) {
   if (!clients.has(socket)) return;
   clients.delete(socket);
-  socket.readyState = 3;
+  socket._wsReady = false;
   console.log(`[-] ${name} left (${clients.size} online)`);
 
   const leaveMsg = {
@@ -281,13 +281,15 @@ function broadcastOnlineCount() {
   broadcastAll({ type: 'online', count: clients.size });
 }
 
-// Heartbeat — send ping every 25s to keep connections alive
+// Heartbeat ping every 25s
 setInterval(() => {
-  for (const [ws] of clients) {
-    try { ws.write(buildFrame(Buffer.alloc(0), 0x09)); } catch {}
+  for (const [sock] of clients) {
+    if (sock._wsReady) {
+      try { sock.write(buildFrame(Buffer.alloc(0), 0x09)); } catch(e) {}
+    }
   }
 }, 25000);
 
-server.listen(PORT, () => {
+server.listen(PORT, '0.0.0.0', () => {
   console.log(`\n🌌 VOID CHAT running on http://localhost:${PORT}\n`);
 });
